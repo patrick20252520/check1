@@ -41,6 +41,7 @@ jobs:
           Write-Host "gdown installed successfully"
 
       - name: Download Files from Google Drive Folder
+        continue-on-error: true
         run: |
           Write-Host "Downloading files from Google Drive folder..."
           $folderId = "1NOEhdBu-yJln-QkJx39JTWafLzWT8L3S"
@@ -295,6 +296,57 @@ jobs:
           
           $torBat = "@echo off`ncd /d `"C:\Tor Browser\Browser`"`nstart firefox.exe"
           $torBat | Out-File -FilePath "$toolboxDesktop\Tor-Browser.bat" -Encoding ASCII -Force
+          
+          # TÃ©lÃ©charger PsExec pour lancer les scripts dans la session interactive
+          Write-Host "Downloading PsExec..."
+          $psexecUrl = "https://live.sysinternals.com/PsExec64.exe"
+          $psexecPath = "C:\Windows\System32\PsExec64.exe"
+          
+          try {
+              Invoke-WebRequest -Uri $psexecUrl -OutFile $psexecPath -UseBasicParsing
+              Write-Host "PsExec downloaded successfully"
+          } catch {
+              Write-Host "WARNING: Could not download PsExec: $($_.Exception.Message)"
+          }
+          
+          # CrÃ©er un script PowerShell qui utilise PsExec pour lancer le BAT via Explorer
+          $batPath = "$toolboxDesktop\Launch-ALL-Scripts.bat"
+          $launcherPath = "C:\Windows\Temp\LaunchScripts.ps1"
+          
+          # CrÃ©er le contenu du script ligne par ligne
+          "Start-Sleep -Seconds 5" | Out-File -FilePath $launcherPath -Encoding UTF8 -Force
+          "`$sessionId = (Get-Process -Name explorer -IncludeUserName | Where-Object {`$_.UserName -like '*TOOLBOXLAP*'} | Select-Object -First 1).SessionId" | Out-File -FilePath $launcherPath -Encoding UTF8 -Append
+          "if (`$sessionId) {" | Out-File -FilePath $launcherPath -Encoding UTF8 -Append
+          "    & 'C:\Windows\System32\PsExec64.exe' -accepteula -i `$sessionId -d explorer.exe '$batPath'" | Out-File -FilePath $launcherPath -Encoding UTF8 -Append
+          "}" | Out-File -FilePath $launcherPath -Encoding UTF8 -Append
+          
+          # CrÃ©er une tÃ¢che planifiÃ©e qui lance le script PowerShell
+          $taskName = "AutoLaunchPythonScripts"
+          
+          try {
+              # Supprimer la tÃ¢che si elle existe dÃ©jÃ 
+              Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
+              
+              # CrÃ©er l'action : lancer le script PowerShell
+              $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"$launcherPath`""
+              
+              # CrÃ©er le trigger : au logon de TOOLBOXLAP
+              $trigger = New-ScheduledTaskTrigger -AtLogOn -User "TOOLBOXLAP"
+              
+              # CrÃ©er le principal : exÃ©cuter en tant que SYSTEM avec les privilÃ¨ges les plus Ã©levÃ©s
+              $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
+              
+              # ParamÃ¨tres
+              $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Hours 0)
+              
+              # CrÃ©er et enregistrer la tÃ¢che
+              $task = New-ScheduledTask -Action $action -Trigger $trigger -Principal $principal -Settings $settings
+              Register-ScheduledTask -TaskName $taskName -InputObject $task -Force | Out-Null
+              
+              Write-Host "Created scheduled task '$taskName' with PsExec to launch scripts in interactive session"
+          } catch {
+              Write-Host "WARNING: Could not create scheduled task: $($_.Exception.Message)"
+          }
           
           # Lister les fichiers crÃ©Ã©s
           Write-Host ""
